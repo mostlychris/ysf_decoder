@@ -58,12 +58,11 @@ DEFAULT_CONFIG = "ysf_decoder_config.json"
 # ── WAV helpers ────────────────────────────────────────────────────────────────
 
 def _wav_stream_header(rate: int = AUDIO_RATE) -> bytes:
-    data_size = 0xFFFFFFF0
     return struct.pack(
         "<4sI4s4sIHHIIHH4sI",
-        b"RIFF", data_size + 36, b"WAVE",
+        b"RIFF", 0xFFFFFFFF, b"WAVE",
         b"fmt ", 16, 1, 1, rate, rate * 2, 2, 16,
-        b"data", data_size,
+        b"data", 0xFFFFFFFF,
     )
 
 def _wav_file(pcm: bytes, rate: int = AUDIO_RATE) -> bytes:
