@@ -1,0 +1,37 @@
+{
+  "name":      "YSF Decoder",
+  "host":      "0.0.0.0",
+  "port":      8082,
+
+  "reflector": "REF001",
+  "label":     "YSF Reflector",
+
+  "usrp_listen_host": "0.0.0.0",
+  "usrp_listen_port": 34002,
+  "usrp_send_host":   "127.0.0.1",
+  "usrp_send_port":   34001,
+
+  "squelch_hold":    0.3,
+  "min_call_length": 1.0,
+  "audio_lp_hz":     3200,
+  "audio_gain":      0.85,
+
+  "dispatcher": {
+    "url":             "http://127.0.0.1:9090",
+    "api_key":         "",
+    "system":          "YSF",
+    "talkgroup":       0,
+    "talkgroup_tag":   "YSF",
+    "talkgroup_name":  "YSF Reflector",
+    "talkgroup_group": "YSF"
+  },
+
+  "broadcastify": {
+    "enabled":        false,
+    "server":         "audio2.broadcastify.com",
+    "port":           80,
+    "password":       "your_stream_password",
+    "mountpoint":     "/your_mountpoint",
+    "bitrate":        32
+  }
+}
