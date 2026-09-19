@@ -289,6 +289,45 @@ class AudioBroadcaster:
                 pass
 
 
+# ── WebSocket event broadcaster ───────────────────────────────────────────────
+
+class WsEventBroadcaster:
+    """Pushes JSON state-change events from the USRP thread to WebSocket clients."""
+
+    def __init__(self):
+        self._clients: dict[int, asyncio.Queue] = {}
+        self._lock    = threading.Lock()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._next_id = 0
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop):
+        self._loop = loop
+
+    def add(self) -> tuple[int, "asyncio.Queue[str]"]:
+        q: asyncio.Queue = asyncio.Queue(maxsize=20)
+        with self._lock:
+            cid = self._next_id
+            self._next_id += 1
+            self._clients[cid] = q
+        return cid, q
+
+    def remove(self, cid: int):
+        with self._lock:
+            self._clients.pop(cid, None)
+
+    def emit(self, event: dict):
+        if not self._loop:
+            return
+        data = json.dumps(event)
+        with self._lock:
+            queues = list(self._clients.values())
+        for q in queues:
+            try:
+                self._loop.call_soon_threadsafe(q.put_nowait, data)
+            except Exception:
+                pass
+
+
 # ── Icecast / Broadcastify feeder (optional) ──────────────────────────────────
 
 class IcecastFeeder:
@@ -469,6 +508,9 @@ class YSFDecoder:
                 m = _PAT.search(line)
                 if m:
                     self._current_callsign = m.group(1)
+                    if _ws_evt and self._detect and self._detect.active:
+                        _ws_evt.emit({"event": "callsign",
+                                      "callsign": self._current_callsign})
             proc.terminate()
         except Exception as e:
             print(f"[YSF] callsign tailer error: {e}", file=sys.stderr)
@@ -562,12 +604,20 @@ class YSFDecoder:
                     )
                     if self._debug:
                         print(f"[YSF] PTT ON  tg={self._current_tg}  src={self._current_src}")
+                    if _ws_evt:
+                        _ws_evt.emit({"event": "state", "active": True,
+                                      "callsign": self._current_callsign,
+                                      "reflector": reflector, "label": label})
 
                 # PTT falling edge → call end
                 elif ptt == USRP_PTT_OFF and last_ptt != USRP_PTT_OFF:
                     self._detect.ptt_off()
                     if self._debug:
                         print(f"[YSF] PTT OFF")
+                    if _ws_evt:
+                        _ws_evt.emit({"event": "state", "active": False,
+                                      "callsign": None,
+                                      "reflector": reflector, "label": label})
 
                 last_ptt = ptt
 
@@ -611,6 +661,7 @@ app = FastAPI(title="YSF Decoder")
 _cfg:    dict                    = {}
 _dec:    Optional[YSFDecoder]    = None
 _bcast:  Optional[AudioBroadcaster] = None
+_ws_evt: Optional[WsEventBroadcaster] = None
 _detect: Optional[CallDetector]  = None
 _feeder: Optional[IcecastFeeder] = None
 
@@ -657,6 +708,37 @@ async def stream():
                              headers={"Cache-Control": "no-cache"})
 
 
+@app.websocket("/ws")
+async def ws_events(ws: WebSocket):
+    await ws.accept()
+    # Send current state immediately on connect
+    try:
+        await ws.send_json({
+            "event":     "state",
+            "active":    bool(_detect and _detect.active),
+            "callsign":  _dec.get_callsign() if _dec else None,
+            "reflector": _cfg.get("reflector", ""),
+            "label":     _cfg.get("label", ""),
+        })
+    except Exception:
+        return
+    if not _ws_evt:
+        return
+    cid, q = _ws_evt.add()
+    try:
+        while True:
+            try:
+                msg = await asyncio.wait_for(q.get(), timeout=25.0)
+                await ws.send_text(msg)
+            except asyncio.TimeoutError:
+                # Heartbeat to keep connection alive
+                await ws.send_json({"event": "ping"})
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        _ws_evt.remove(cid)
+
+
 @app.websocket("/ws/audio")
 async def ws_audio(ws: WebSocket):
     await ws.accept()
@@ -677,7 +759,7 @@ async def ws_audio(ws: WebSocket):
 # ── main ───────────────────────────────────────────────────────────────────────
 
 def main():
-    global _cfg, _dec, _bcast, _detect, _feeder
+    global _cfg, _dec, _bcast, _ws_evt, _detect, _feeder
 
     parser = argparse.ArgumentParser(description="YSF reflector audio decoder")
     parser.add_argument("--config",       default=DEFAULT_CONFIG)
@@ -696,7 +778,8 @@ def main():
     host = _cfg.get("host", "0.0.0.0")
     port = args.listen_port or _cfg.get("port", 8082)
 
-    _bcast = AudioBroadcaster()
+    _bcast  = AudioBroadcaster()
+    _ws_evt = WsEventBroadcaster()
 
     uploader = None
     disp_cfg = _cfg.get("dispatcher", {})
@@ -715,7 +798,9 @@ def main():
     _detect._dec = _dec  # allow CallDetector to call _dec.get_tg() if needed
 
     async def serve():
-        _bcast.set_loop(asyncio.get_running_loop())
+        loop = asyncio.get_running_loop()
+        _bcast.set_loop(loop)
+        _ws_evt.set_loop(loop)
         _dec.start()
         config = uvicorn.Config(app, host=host, port=port, log_level="warning")
         server = uvicorn.Server(config)
