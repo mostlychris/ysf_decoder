@@ -426,13 +426,17 @@ class YSFDecoder:
         self._running = False
         self._thread: Optional[threading.Thread] = None
 
-        self._current_tg:  Optional[str] = None
-        self._current_src: Optional[str] = None
+        self._current_tg:       Optional[str] = None
+        self._current_src:      Optional[str] = None
+        self._current_callsign: Optional[str] = None
         self._usrp_connected = False
 
     # Public accessors for /status
     def get_tg(self) -> tuple[Optional[str], Optional[str]]:
         return self._current_tg, self._current_src
+
+    def get_callsign(self) -> Optional[str]:
+        return self._current_callsign
 
     @property
     def usrp_connected(self) -> bool:
@@ -542,6 +546,23 @@ class YSFDecoder:
 
                 last_ptt = ptt
 
+                # Metadata packet — Analog_Bridge exports callsign as JSON payload
+                if frame["type"] == USRP_TYPE_META and frame["payload"]:
+                    try:
+                        raw = frame["payload"].split(b'\x00')[0].decode('ascii', errors='ignore').strip()
+                        if raw:
+                            meta = json.loads(raw)
+                            cs = (meta.get('src') or meta.get('cs') or
+                                  meta.get('callsign') or meta.get('source') or '').strip()
+                            if cs:
+                                self._current_callsign = cs
+                            if self._debug:
+                                print(f"[YSF] META  {raw}")
+                    except Exception:
+                        if self._debug:
+                            raw = frame["payload"][:64]
+                            print(f"[YSF] META (non-JSON) {raw!r}")
+
                 # Audio payload (type=0, PTT on)
                 if frame["type"] == USRP_TYPE_PCM and frame["payload"]:
                     buf.extend(frame["payload"])
@@ -573,6 +594,7 @@ _feeder: Optional[IcecastFeeder] = None
 def status():
     ice = _cfg.get("broadcastify", {})
     tg, src = _dec.get_tg() if _dec else (None, None)
+    callsign = _dec.get_callsign() if _dec else None
     return {
         "name":           _cfg.get("name", "YSF Decoder"),
         "reflector":      _cfg.get("reflector", ""),
@@ -581,6 +603,7 @@ def status():
         "rx_count":       _detect.rx_count if _detect else 0,
         "talkgroup":      tg,
         "source":         src,
+        "callsign":       callsign,
         "usrp_connected": _dec.usrp_connected if _dec else False,
         "audio_rate":     AUDIO_RATE,
         "icecast": {
