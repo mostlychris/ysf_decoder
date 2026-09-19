@@ -49,7 +49,7 @@ transferRootDir = /tmp
 subscriberFile = /var/lib/dvswitch/subscriber_ids.csv
 decoderFallBack = true
 useEmulator = true
-emulatorAddress = 127.0.0.1:2470
+emulatorAddress = 127.0.0.1:2471
 pcmPort = 2223
 
 ; AMBE TLV ↔ MMDVM_Bridge_YSF
@@ -194,8 +194,25 @@ else
     echo "[setup] $YSF_DEC_DIR/ysf_decoder_config.json already exists — skipping."
 fi
 
-# ── Systemd: ysf_gateway.service ──────────────────────────────────────────────
+# ── Systemd: md380emu-ysf.service (dedicated AMBE decoder for YSF) ───────────
+# The default md380-emu runs on port 2470 for DMR. YSF uses a separate instance
+# on 2471 to prevent simultaneous decode contention under QEMU emulation.
 echo "[setup] Writing systemd unit files..."
+cat > /lib/systemd/system/md380emu-ysf.service << 'EOFUNIT'
+[Unit]
+Description=md380-emu AMBE Decoder (YSF - port 2471)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/opt/md380-emu/qemu-arm-static /opt/md380-emu/md380-emu -S 2471
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOFUNIT
 
 cat > /lib/systemd/system/ysf_gateway.service << EOF
 [Unit]
@@ -292,6 +309,7 @@ EOF
 # ── Enable services ───────────────────────────────────────────────────────────
 echo "[setup] Enabling services (not starting yet — set reflector first)..."
 systemctl daemon-reload
+systemctl enable md380emu-ysf.service
 systemctl enable ysf_gateway.service
 systemctl enable mmdvm_bridge_ysf.service
 systemctl enable analog_bridge_ysf.service
