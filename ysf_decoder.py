@@ -599,6 +599,7 @@ class YSFDecoder:
 
                 # PTT rising edge → call start
                 if ptt == USRP_PTT_ON and last_ptt != USRP_PTT_ON:
+                    buf.clear()                           # discard any pre-TX noise
                     tg  = str(frame["tg"]) if frame["tg"] else None
                     src = str(frame["mpxid"]) if frame["mpxid"] else None
                     if tg:
@@ -615,6 +616,7 @@ class YSFDecoder:
                 # PTT falling edge → call end
                 elif ptt == USRP_PTT_OFF and last_ptt != USRP_PTT_OFF:
                     self._detect.ptt_off()
+                    buf.clear()                           # discard tail noise
                     if self._debug:
                         print(f"[YSF] PTT OFF")
 
@@ -637,8 +639,8 @@ class YSFDecoder:
                             raw = frame["payload"][:64]
                             print(f"[YSF] META (non-JSON) {raw!r}")
 
-                # Audio payload (type=0, PTT on)
-                if frame["type"] == USRP_TYPE_PCM and frame["payload"]:
+                # Audio payload — only accumulate while PTT is active
+                if frame["type"] == USRP_TYPE_PCM and frame["payload"] and ptt == USRP_PTT_ON:
                     buf.extend(frame["payload"])
 
                 while len(buf) >= CHUNK_SIZE:
