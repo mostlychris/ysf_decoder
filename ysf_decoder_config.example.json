@@ -19,6 +19,7 @@
   "dispatcher": {
     "url":             "http://127.0.0.1:9090",
     "api_key":         "",
+    "upload_calls":    false,
     "system":          "YSF",
     "talkgroup":       0,
     "talkgroup_tag":   "YSF",

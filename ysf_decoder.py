@@ -699,8 +699,9 @@ def main():
     _bcast = AudioBroadcaster()
 
     uploader = None
-    if "dispatcher" in _cfg:
-        uploader = CallUploader(_cfg["dispatcher"])
+    disp_cfg = _cfg.get("dispatcher", {})
+    if disp_cfg.get("upload_calls", False) and disp_cfg.get("url"):
+        uploader = CallUploader(disp_cfg)
 
     _detect = CallDetector(_cfg, uploader)
 
