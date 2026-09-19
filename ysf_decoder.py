@@ -580,8 +580,7 @@ class YSFDecoder:
                     if cur != prev_ws_active and _ws_evt:
                         prev_ws_active = cur
                         _ws_evt.emit({"event": "state", "active": cur,
-                                      "callsign": self._current_callsign if cur else None,
-                                      "reflector": reflector, "label": label})
+                                      "callsign": self._current_callsign if cur else None})
                     continue
                 except Exception as e:
                     print(f"[YSF] recv error: {e}", file=sys.stderr)
@@ -655,8 +654,7 @@ class YSFDecoder:
                 if cur != prev_ws_active and _ws_evt:
                     prev_ws_active = cur
                     _ws_evt.emit({"event": "state", "active": cur,
-                                  "callsign": self._current_callsign if cur else None,
-                                  "reflector": reflector, "label": label})
+                                  "callsign": self._current_callsign if cur else None})
 
         finally:
             sock.close()
@@ -722,11 +720,9 @@ async def ws_events(ws: WebSocket):
     # Send current state immediately on connect
     try:
         await ws.send_json({
-            "event":     "state",
-            "active":    bool(_detect and _detect.active),
-            "callsign":  _dec.get_callsign() if _dec else None,
-            "reflector": _cfg.get("reflector", ""),
-            "label":     _cfg.get("label", ""),
+            "event":    "state",
+            "active":   bool(_detect and _detect.active),
+            "callsign": _dec.get_callsign() if _dec else None,
         })
     except Exception:
         return
