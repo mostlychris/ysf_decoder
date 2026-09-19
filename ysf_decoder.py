@@ -546,11 +546,12 @@ class YSFDecoder:
         if reflector:
             print(f"[YSF] Reflector: {reflector}  {label}")
 
-        last_reg    = 0.0
-        last_packet = 0.0
-        last_ptt    = USRP_PTT_OFF
-        buf         = bytearray()
-        timeout     = CHUNK_MS / 1000
+        last_reg       = 0.0
+        last_packet    = 0.0
+        last_ptt       = USRP_PTT_OFF
+        prev_ws_active = False
+        buf            = bytearray()
+        timeout        = CHUNK_MS / 1000
 
         try:
             while self._running:
@@ -574,6 +575,13 @@ class YSFDecoder:
                 except socket.timeout:
                     # Tick detector so HOLD timer can expire
                     self._detect.feed(SILENCE)
+                    # Emit active=False if hold just expired
+                    cur = self._detect.active
+                    if cur != prev_ws_active and _ws_evt:
+                        prev_ws_active = cur
+                        _ws_evt.emit({"event": "state", "active": cur,
+                                      "callsign": self._current_callsign if cur else None,
+                                      "reflector": reflector, "label": label})
                     continue
                 except Exception as e:
                     print(f"[YSF] recv error: {e}", file=sys.stderr)
@@ -604,20 +612,12 @@ class YSFDecoder:
                     )
                     if self._debug:
                         print(f"[YSF] PTT ON  tg={self._current_tg}  src={self._current_src}")
-                    if _ws_evt:
-                        _ws_evt.emit({"event": "state", "active": True,
-                                      "callsign": self._current_callsign,
-                                      "reflector": reflector, "label": label})
 
                 # PTT falling edge → call end
                 elif ptt == USRP_PTT_OFF and last_ptt != USRP_PTT_OFF:
                     self._detect.ptt_off()
                     if self._debug:
                         print(f"[YSF] PTT OFF")
-                    if _ws_evt:
-                        _ws_evt.emit({"event": "state", "active": False,
-                                      "callsign": None,
-                                      "reflector": reflector, "label": label})
 
                 last_ptt = ptt
 
@@ -649,6 +649,14 @@ class YSFDecoder:
                     self._bcast.broadcast(chunk)
                     if self._feeder:
                         self._feeder.send(chunk)
+
+                # Emit WS event whenever active state changes
+                cur = self._detect.active
+                if cur != prev_ws_active and _ws_evt:
+                    prev_ws_active = cur
+                    _ws_evt.emit({"event": "state", "active": cur,
+                                  "callsign": self._current_callsign if cur else None,
+                                  "reflector": reflector, "label": label})
 
         finally:
             sock.close()
