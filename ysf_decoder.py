@@ -424,7 +424,8 @@ class YSFDecoder:
             gain =cfg.get("audio_gain",  0.85),
         )
         self._running = False
-        self._thread: Optional[threading.Thread] = None
+        self._thread:    Optional[threading.Thread] = None
+        self._cs_thread: Optional[threading.Thread] = None
 
         self._current_tg:       Optional[str] = None
         self._current_src:      Optional[str] = None
@@ -443,10 +444,34 @@ class YSFDecoder:
         return self._usrp_connected
 
     def start(self):
-        self._running = True
-        self._thread  = threading.Thread(target=self._loop, daemon=True,
-                                         name="ysf-usrp")
+        self._running   = True
+        self._thread    = threading.Thread(target=self._loop, daemon=True,
+                                           name="ysf-usrp")
+        self._cs_thread = threading.Thread(target=self._callsign_loop, daemon=True,
+                                           name="ysf-cs")
         self._thread.start()
+        self._cs_thread.start()
+
+    def _callsign_loop(self):
+        """Tail mmdvm_bridge_ysf journal for 'Lookup call CALLSIGN' lines."""
+        import re
+        _PAT = re.compile(r'Lookup call (\S+) returned')
+        try:
+            proc = subprocess.Popen(
+                ['journalctl', '-u', 'mmdvm_bridge_ysf', '-f', '-n', '0',
+                 '--output=cat', '--no-pager'],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            )
+            for raw in proc.stdout:
+                if not self._running:
+                    break
+                line = raw.decode('utf-8', errors='ignore')
+                m = _PAT.search(line)
+                if m:
+                    self._current_callsign = m.group(1)
+            proc.terminate()
+        except Exception as e:
+            print(f"[YSF] callsign tailer error: {e}", file=sys.stderr)
 
     def stop(self):
         self._running = False
